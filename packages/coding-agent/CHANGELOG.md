@@ -8,6 +8,7 @@
 - Print mode now emits displayed native advisor findings and accepted/uncertain review notices through the host's shared plain-text presentation.
 - Preserved non-terminal interruption events when queued user steering resumes a run; an empty extension display queue no longer delays terminal-event staging.
 - Isolated the session/log descriptor-leak regression in a fresh subprocess with an explicitly inherited control descriptor, preserving its security assertions independently of runtime file-open defaults and neighboring mocks.
+- Fixed stale archive member indexes after same-size rewrites with restored mtime: cache identity uses nanosecond timestamps and recent writes are not memoized, matching the existing racy-clean snapshot policy.
 
 ## [18.8.9] - 2026-10-10
 
