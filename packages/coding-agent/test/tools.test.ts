@@ -1777,6 +1777,25 @@ describe("Coding Agent Tools", () => {
 			expect(output).not.toContain("alpha.txt");
 		});
 
+		it("re-reads recent archives when filesystem timestamps collide", async () => {
+			const archivePath = path.join(testDir, "coarse-timestamp.zip");
+			fs.writeFileSync(archivePath, createZipArchive([{ path: "alpha.txt", content: "first\n" }]));
+			// Model a filesystem returning the same identity for both writes in one timestamp granule.
+			const unchangedStat = await fs.promises.stat(archivePath, { bigint: true });
+			const statSpy = vi.spyOn(fs.promises, "stat").mockResolvedValue(unchangedStat);
+			try {
+				expect(getTextOutput(await readTool.execute("coarse-before", { path: archivePath }))).toContain(
+					"alpha.txt",
+				);
+				fs.writeFileSync(archivePath, createZipArchive([{ path: "bravo.txt", content: "other\n" }]));
+				const output = getTextOutput(await readTool.execute("coarse-after", { path: archivePath }));
+				expect(output).toContain("bravo.txt");
+				expect(output).not.toContain("alpha.txt");
+			} finally {
+				statSpy.mockRestore();
+			}
+		});
+
 		it("should list zip archives without inflating member payloads", async () => {
 			const archivePath = path.join(testDir, "header-only.zip");
 			fs.writeFileSync(

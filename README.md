@@ -32,6 +32,41 @@ The most capable agent surface that ships. Continuously tuned by real-world use 
 > while we evaluate how open contributions go. Depending on the results, the
 > vouch system may return.
 
+## Fork Linux releases
+
+This fork's `Fork Linux binaries` workflow (`.github/workflows/fork-release.yml`) builds standalone **glibc Linux ARM64 and x64** executables on GitHub-hosted runners. The Decision advisor extension is not bundled or required. The patched host source is in `fix/advisor-no-trigger`; fork `main` is not automatically updated by this workflow.
+
+- **Manual dispatch:** builds, verifies and uploads `fork-linux-arm64` and `fork-linux-x64` artifacts; never publishes a release. GitHub requires the workflow on the default branch before manual dispatch is available. Once it is there, select the desired branch in Actions or run:
+
+  ```sh
+  gh workflow run fork-release.yml --repo jonyee/oh-my-pi --ref fix/advisor-no-trigger
+  ```
+
+- **Push a `fork-v*` tag:** builds and verifies both executables, then publishes a new GitHub Release on that tag. Tag the commit containing both the host patch and this workflow; for example, use `fork-v18.8.9-1`. The tag trigger works without first merging into the default branch. Do not use the upstream version-bump/release script, which has different publishing targets.
+- Build jobs have read-only repository access. Only the tag-triggered publish job requests `contents: write` using GitHub's automatic token; no npm, Apple signing, Azure credentials or custom runner is needed. Enable Actions for the fork if GitHub has disabled inherited workflows, and ensure organization policy allows that job permission. This workflow does not change repository settings itself.
+- Releases contain `omp-linux-arm64`, `omp-linux-x64`, `SHA256SUMS.txt`, `BUILD.txt` (source commit and dependency versions), and license notices. Each binary runs built-in smoke checks and an offline advisor-delivery probe before upload. Both architecture jobs must succeed before publication; an existing release is not overwritten.
+
+The workflow reuses SHA-512-pinned upstream **18.8.9** native addons because this fork's patch is TypeScript-only. The staging helper rejects native package version or native-source tree changes; if Rust/native sources change, build matching addons or update their source/integrity pins deliberately. The compiled CLI still reports its upstream package version; use the release tag and `BUILD.txt` to identify the fork revision.
+
+After a release exists, download and verify the executable for your architecture without replacing the system-managed `omp`:
+
+```sh
+tag=fork-v18.8.9-1
+case "$(uname -m)" in
+  aarch64|arm64) asset=omp-linux-arm64 ;;
+  x86_64) asset=omp-linux-x64 ;;
+  *) printf 'Unsupported architecture\n' >&2; exit 1 ;;
+esac
+download_dir="$(mktemp -d)"
+gh release download "$tag" --repo jonyee/oh-my-pi --dir "$download_dir" \
+  --pattern "$asset" --pattern SHA256SUMS.txt
+(cd "$download_dir" && sha256sum --check --ignore-missing SHA256SUMS.txt)
+install -Dm755 "$download_dir/$asset" "$HOME/.local/bin/omp-fork"
+"$HOME/.local/bin/omp-fork" --version
+```
+
+On NixOS, retain the existing `nix-ld` compatibility setup for downloaded Linux binaries, or use the fork's Nix flake package. Do **not** run `omp update` to update this fork: its updater still targets upstream. Install a new fork release or update the pinned Nix input instead. Nix-built executables require their store closure and are not substitutes for these portable release assets.
+
 ## Install
 
 **macOS · Linux**

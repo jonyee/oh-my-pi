@@ -1,0 +1,119 @@
+name: Fork Linux binaries
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "fork-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and smoke ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.2"
+      - name: Install locked dependencies without lifecycle scripts
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Stage integrity-pinned upstream native addons
+        env:
+          TARGET: ${{ matrix.target }}
+        run: bun scripts/ci-fork-native-addons.ts "$TARGET"
+      - name: Build standalone executable
+        env:
+          TARGET: ${{ matrix.target }}
+        run: bun scripts/ci-release-build-binaries.ts --targets "$TARGET"
+      - name: Exercise delivery and native presentation regressions
+        run: >-
+          bun test
+          packages/coding-agent/test/agent-session-idle-custom-message-render.test.ts
+          packages/tui/test/native/transcript-native.test.ts
+      - name: Smoke packaged executable without credentials
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          binary="$PWD/packages/coding-agent/binaries/omp-$TARGET"
+          runtime_dir="$(mktemp -d)"
+          trap 'rm -rf "$runtime_dir"' EXIT
+          mkdir -p "$runtime_dir/home" "$runtime_dir/data"
+          HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/data" "$binary" --version
+          HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/data" "$binary" --smoke-test
+          bun scripts/ci-fork-binary-smoke.ts "$binary"
+      - name: Package executable and notices
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p fork-release
+          cp "packages/coding-agent/binaries/omp-$TARGET" LICENSE THIRD-PARTY-NOTICES.txt fork-release/
+          printf 'Source repository: %s\nSource commit: %s\nRelease ref: %s\nBun: 1.4.2\nNative addon: 18.8.9 (integrity pinned in ci-fork-native-addons.ts)\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_REF_NAME" > fork-release/BUILD.txt
+          bun scripts/ci-release-checksums.ts "fork-release/SHA256SUMS-$TARGET.txt" \
+            "fork-release/omp-$TARGET" fork-release/LICENSE fork-release/THIRD-PARTY-NOTICES.txt fork-release/BUILD.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fork-${{ matrix.target }}
+          path: fork-release/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish fork-tag release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/fork-v')
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: fork-linux-*
+          path: fork-release
+      - name: Assemble verified assets
+        run: |
+          set -euo pipefail
+          (cd fork-release/fork-linux-x64 && sha256sum -c SHA256SUMS-linux-x64.txt)
+          (cd fork-release/fork-linux-arm64 && sha256sum -c SHA256SUMS-linux-arm64.txt)
+          for notice in LICENSE THIRD-PARTY-NOTICES.txt BUILD.txt; do
+            cmp "fork-release/fork-linux-x64/$notice" "fork-release/fork-linux-arm64/$notice"
+          done
+          mkdir -p release-assets
+          cp fork-release/fork-linux-x64/omp-linux-x64 release-assets/
+          cp fork-release/fork-linux-arm64/omp-linux-arm64 release-assets/
+          cp fork-release/fork-linux-x64/{LICENSE,THIRD-PARTY-NOTICES.txt,BUILD.txt} release-assets/
+          (cd release-assets && sha256sum omp-linux-arm64 omp-linux-x64 BUILD.txt LICENSE THIRD-PARTY-NOTICES.txt > SHA256SUMS.txt)
+      - name: Publish only a new fork-tag release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf 'Fork build of OMP from commit %s.\n\nLinux glibc executables for ARM64 and x64. Bun and the integrity-pinned upstream 18.8.9 native addon are embedded. Optional models and integrations may download runtime dependencies. No Decision advisor extension is bundled.\n\nVerify downloaded assets with: sha256sum -c SHA256SUMS.txt. The upstream updater is unchanged: do not use omp update to update this fork.\n' \
+            "$GITHUB_SHA" > release-notes.txt
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "$GITHUB_REF_NAME" --notes-file release-notes.txt \
+            release-assets/omp-linux-arm64 release-assets/omp-linux-x64 \
+            release-assets/BUILD.txt release-assets/LICENSE \
+            release-assets/THIRD-PARTY-NOTICES.txt release-assets/SHA256SUMS.txt

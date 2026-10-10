@@ -1,3 +1,4 @@
+import { stat as statFile } from "node:fs/promises";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { TextContent } from "@oh-my-pi/pi-ai";
 import {
@@ -47,11 +48,11 @@ const CACHEABLE_ARCHIVE_FORMATS: Partial<Record<ArchiveFormat, true>> = { zip: t
 
 interface CachedArchiveReader {
 	reader: ArchiveReader;
-	ino: number;
-	mtimeMs: number;
-	/** Change time: moves on every write and permission change and cannot be set back, unlike mtime. */
-	ctimeMs: number;
-	size: number;
+	ino: bigint;
+	mtimeNs: bigint;
+	/** Recent ctimes can collide within a filesystem timestamp granule. */
+	ctimeNs: bigint;
+	size: bigint;
 	entryCount: number;
 }
 
@@ -67,18 +68,19 @@ const archiveReaderCache = new LRUCache<string, CachedArchiveReader>({
 	sizeCalculation: cached => Math.max(1, cached.entryCount),
 });
 
+// Match grep's racy-clean policy: recent writes are not safe metadata-only cache entries.
+const RACY_STAMP_WINDOW_NS = 2_000_000_000n;
+
 async function openArchiveCached(absolutePath: string): Promise<ArchiveReader> {
 	// A vanished or unreadable archive is reported by the opener, as it always has been.
-	const stat = await Bun.file(absolutePath)
-		.stat()
-		.catch(() => null);
+	const stat = await statFile(absolutePath, { bigint: true }).catch(() => null);
 	if (!stat) return openArchive(absolutePath);
 	const cached = archiveReaderCache.get(absolutePath);
 	if (
 		cached &&
 		cached.ino === stat.ino &&
-		cached.mtimeMs === stat.mtimeMs &&
-		cached.ctimeMs === stat.ctimeMs &&
+		cached.mtimeNs === stat.mtimeNs &&
+		cached.ctimeNs === stat.ctimeNs &&
 		cached.size === stat.size
 	) {
 		return cached.reader;
@@ -88,13 +90,18 @@ async function openArchiveCached(absolutePath: string): Promise<ArchiveReader> {
 		archiveReaderCache.delete(absolutePath);
 		return reader;
 	}
+	const changedNs = stat.mtimeNs > stat.ctimeNs ? stat.mtimeNs : stat.ctimeNs;
+	if (BigInt(Date.now()) * 1_000_000n - changedNs < RACY_STAMP_WINDOW_NS) {
+		archiveReaderCache.delete(absolutePath);
+		return reader;
+	}
 	let entryCount = 0;
 	for (const _entry of reader.indexEntries()) entryCount++;
 	archiveReaderCache.set(absolutePath, {
 		reader,
 		ino: stat.ino,
-		mtimeMs: stat.mtimeMs,
-		ctimeMs: stat.ctimeMs,
+		mtimeNs: stat.mtimeNs,
+		ctimeNs: stat.ctimeNs,
 		size: stat.size,
 		entryCount,
 	});

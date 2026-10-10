@@ -1579,10 +1579,12 @@ export interface ExtensionAPI {
 	/**
 	 * Send a custom message to the session.
 	 *
-	 * With the default delivery (no `deliverAs`), an idle `display: true` message renders in the
-	 * transcript immediately, even with `triggerTurn: false`, without starting a turn. This does
-	 * not apply to `deliverAs: "nextTurn"` or `deliverAs: "aside"`, which keep the semantics
-	 * described below (`nextTurn` stays hidden until consumed; `aside` starts a turn when idle).
+	 * With the default delivery (no `deliverAs`), explicit `triggerTurn: false` appends without
+	 * starting or continuing a model turn. While streaming, messages wait for the completed tool
+	 * batch/turn boundary or terminal unwind; `display: true` messages then render immediately.
+	 * Idle messages append immediately, with `display: false` staying silent. Pending messages
+	 * are discarded on abort, disposal, or a session change. Omitted `triggerTurn` still steers
+	 * while streaming. Explicit delivery modes keep their separate semantics described below.
 	 *
 	 * `deliverAs: "nextTurn"` keeps the message hidden from the editable pending-message UI.
 	 * If `triggerTurn` is also true while the current turn is still unwinding, the session schedules
@@ -1826,6 +1828,9 @@ type HandlerFn = (...args: unknown[]) => Promise<unknown>;
 export type SendMessageHandler = <T = unknown>(
 	message: CustomMessagePayload<T>,
 	/**
+	 * With no `deliverAs`, explicit `triggerTurn: false` appends at a safe tool/turn boundary
+	 * or terminal unwind without continuing the model; displayable messages render on append.
+	 * Pending appends are discarded on abort, disposal, or a session change.
 	 * `deliverAs: "nextTurn"` queues hidden custom context for the next turn.
 	 * When paired with `triggerTurn: true` during prompt teardown, the session schedules
 	 * an internal continuation without surfacing the message in the editable pending queue.

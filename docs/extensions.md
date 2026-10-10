@@ -260,17 +260,38 @@ export default function (pi: ExtensionAPI) {
 
 `pi.sendMessage(message, options)` supports:
 
-- `deliverAs: "steer"` (default while streaming) — steers the current run
+- `deliverAs: "steer"` (default while streaming unless `triggerTurn: false` is explicit) — steers the current run
 - `deliverAs: "followUp"` — queued behind the current run while streaming
 - `deliverAs: "nextTurn"` — kept out of the editable pending-message UI; while streaming it waits for the next turn, and when idle without `triggerTurn` it is appended to context/history without starting a turn
 - `deliverAs: "aside"` — injected at the next agent step boundary without interrupting the current tool batch, except that it ends a running interruptible `wait` (the wait returns "Wait interrupted by message." and its job keeps running); when idle it normally starts a turn regardless of `triggerTurn`. Plan mode or user-interrupt auto-resume suppression folds it into context instead
 - `triggerTurn: true` — starts a turn when idle (also honored with `deliverAs: "nextTurn"`: idle prompts immediately; while streaming the queued message schedules an internal continuation)
+- `triggerTurn: false` with no `deliverAs` — appends without starting or continuing a model turn; while streaming it waits for the completed tool batch/turn boundary or terminal unwind, then persists and renders `display: true` messages exactly once in order. Pending messages are discarded on abort, disposal, or a session change. Explicit delivery modes above are unaffected
 
 When idle without `triggerTurn`, ordinary `sendMessage` delivery appends the
 message without starting a turn. A `display: true` message is rendered
 immediately; `"nextTurn"` delivery does not emit that immediate display event.
 ACP clients can defer agent-initiated turns, in which case requests that would
 start one are retained as hidden next-turn messages.
+
+Extensions can use the native advisor card without requesting another model turn:
+
+```ts
+pi.sendMessage(
+  {
+    customType: "advisor",
+    content: adviceText,
+    display: true,
+    details: { notes: [{ note: adviceText, severity: "concern", advisor: "extension" }] },
+  },
+  { triggerTurn: false },
+);
+```
+
+Omit `deliverAs` for this no-turn delivery. For a review with no notes, pass
+`details: { notes: [], status: "accept" }` to display "The advisor was requested
+but had no findings.", or `status: "cannot_tell"` to display "The advisor was
+requested but could not determine whether a correction is needed." The optional
+status applies only to zero-note cards; omitting it preserves the native empty-card behavior.
 
 `pi.sendUserMessage(content, { deliverAs })` submits text/images without slash-command
 or prompt-template expansion. Omit `deliverAs` to start a prompt when idle;

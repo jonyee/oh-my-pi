@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Native advisor messages support explicit accepted and uncertain review statuses when there are no findings, using concise notices instead of empty cards.
+
 ## [18.8.9] - 2026-10-10
 
 ### Breaking Changes

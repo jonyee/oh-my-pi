@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import { createCompactionSummaryMessage, createCustomMessage } from "@oh-my-pi/pi-agent-core/compaction/messages";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { createAdvisorMessageCard } from "@oh-my-pi/pi-tui/chat/advisor-message";
+import { createAdvisorMessageCard, formatAdvisorMessageText } from "@oh-my-pi/pi-tui/chat/advisor-message";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
 import { BashExecutionComponent } from "@oh-my-pi/pi-tui/chat/bash-execution";
 import { ChatTranscriptBuilder } from "@oh-my-pi/pi-tui/chat/chat-transcript-builder";
@@ -96,6 +96,76 @@ function opsSince(h: TspHarness, frameCount: number): TspOp[] {
 }
 
 describe("native transcript", () => {
+	for (const [status, expected] of [
+		["accept", "The advisor was requested but had no findings."],
+		["cannot_tell", "The advisor was requested but could not determine whether a correction is needed."],
+	] as const) {
+		it(`presents an empty ${status} advisor review consistently without a zero-note card`, async () => {
+			const details = { notes: [], status };
+			const component = createAdvisorMessageCard(details, () => false, theme);
+			expect(formatAdvisorMessageText(details)).toBe(expected);
+			expect(Bun.stripANSI(component.render(120).join("\n")).trim()).toBe(expected);
+			for (const width of [20, 40]) {
+				const lines = component.render(width).map(line => Bun.stripANSI(line));
+				expect(lines.map(line => line.trim()).join(" ")).toBe(expected);
+				for (const line of lines) expect(Bun.stringWidth(line)).toBeLessThanOrEqual(width);
+			}
+			const h = await startWith(h => h.tui.addChild(component));
+			const note = h.find(node => node.p?.role === "omp.advisor");
+			expect(note?.k).toBe("text");
+			if (note?.k !== "text") throw new Error("Expected an advisor text notice");
+			expect(note?.p?.spans?.map(span => span.t).join("")).toBe(expected);
+			expect(h.find(node => node.k === "card" && node.p?.role === "omp.advisor")).toBeUndefined();
+			expect(h.errors).toEqual([]);
+		});
+	}
+
+	it("keeps advisor findings ahead of status and preserves expansion and narrow rendering", async () => {
+		const notes = [
+			{ note: "Check the cache", severity: "blocker" as const, advisor: "Security" },
+			{ note: "Check the key" },
+			{ note: "Check the expiry" },
+			{ note: "Check the eviction" },
+		];
+		let expanded = false;
+		const baseline = createAdvisorMessageCard({ notes }, () => expanded, theme);
+		const accepted = createAdvisorMessageCard({ notes, status: "accept" }, () => expanded, theme);
+		const uncertain = createAdvisorMessageCard({ notes, status: "cannot_tell" }, () => expanded, theme);
+		for (const value of [false, true]) {
+			expanded = value;
+			for (const width of [12, 40, 120]) {
+				const lines = accepted.render(width);
+				expect(lines).toEqual(baseline.render(width));
+				expect(uncertain.render(width)).toEqual(lines);
+				for (const line of lines) expect(Bun.stringWidth(line)).toBeLessThanOrEqual(width);
+			}
+		}
+		const findingText = formatAdvisorMessageText({ notes });
+		expect(formatAdvisorMessageText({ notes, status: "accept" })).toBe(findingText);
+		expect(formatAdvisorMessageText({ notes, status: "cannot_tell" })).toBe(findingText);
+		for (const note of notes) expect(findingText).toContain(note.note);
+		expanded = false;
+		const h = await startWith(h => h.tui.addChild(accepted));
+		const card = h.find(node => node.k === "card" && node.p?.role === "omp.advisor");
+		expect(card?.p).toMatchObject({ collapsible: true, collapsed: true });
+		expect(h.findAll(node => node.p?.role === "omp.advisor.note")).toHaveLength(4);
+		expanded = true; // The transcript-wide Ctrl+O getter still expands the finding card.
+		accepted.setExpanded(true);
+		await h.render();
+		expect(h.byId(card!.id)?.p).toMatchObject({ collapsed: false });
+		expect(h.errors).toEqual([]);
+	});
+
+	it("preserves the legacy empty advisor card when no review status is supplied", async () => {
+		const component = createAdvisorMessageCard({ notes: [] }, () => false, theme);
+		expect(formatAdvisorMessageText({ notes: [] })).toBe("");
+		expect(formatAdvisorMessageText(undefined)).toBe("");
+		const h = await startWith(h => h.tui.addChild(component));
+		const card = h.find(node => node.p?.role === "omp.advisor");
+		expect(card?.k).toBe("card");
+		expect(h.errors).toEqual([]);
+	});
+
 	it("streams assistant text as appends to one md node that stops streaming when final", async () => {
 		const component = new AssistantMessageComponent();
 		const h = await startWith(h => h.tui.addChild(component));
