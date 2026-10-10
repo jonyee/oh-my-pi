@@ -67,6 +67,22 @@ install -Dm755 "$download_dir/$asset" "$HOME/.local/bin/omp-fork"
 
 On NixOS, retain the existing `nix-ld` compatibility setup for downloaded Linux binaries, or use the fork's Nix flake package. Do **not** run `omp update` to update this fork: its updater still targets upstream. Install a new fork release or update the pinned Nix input instead. Nix-built executables require their store closure and are not substitutes for these portable release assets.
 
+## Scheduled upstream updates
+
+`Upstream release update PR` runs every Saturday at **23:50 UTC** (`50 23 * * 6`), with a first planned check on **2026-10-10**, and also supports manual dispatch:
+
+```sh
+gh workflow run upstream-update.yml --repo jonyee/oh-my-pi --ref main
+```
+
+The workflow must be merged into the default branch before GitHub schedules it. Scheduled runs can be delayed; the cron is recurring, not a one-shot timer. If today's window is missed, use manual dispatch after merging. No PR is created if the fork already contains the latest stable upstream release; an existing upstream-update PR blocks another proposal until it is reviewed.
+
+The automation checks `can1357/oh-my-pi`'s latest published stable release, resolves its tag to a commit, and proposes it on `sync/upstream-vVERSION`. It merges the fork's current default-branch commit into that proposal when possible so fork fixes and source-native builds remain present. A merge conflict creates a **draft PR** with the upstream commit intact for manual resolution; it never commits conflict markers, force-updates a branch, changes `main`, auto-merges, or creates releases. Reviewer edits on an existing candidate branch are not overwritten.
+
+Review incoming source/workflow changes before approving CI. Validate the proposal with the native-advisor regressions and the manual `Fork Linux binaries` workflow, then use **Create a merge commit** rather than squash/rebase so upstream ancestry is retained. Heavy native builds remain on GitHub; the scheduled check itself only makes GitHub API requests and does not install dependencies or run upstream code. There is no prebuilt-addon pin helper to refresh.
+
+The proposal job requests `contents: write` and `pull-requests: write` from GitHub's automatic token. Repository Settings → Actions → General must permit **Allow GitHub Actions to create and approve pull requests**; otherwise GitHub can reject PR creation even though a proposal branch was created. This workflow does not enable that repository setting or approve its own PR. Bot-generated PR checks may require **Approve workflows to run**; do not assume a bot push triggers binary builds automatically. Release tags and Nix activation remain separate manual actions.
+
 ## Install
 
 **macOS · Linux**
