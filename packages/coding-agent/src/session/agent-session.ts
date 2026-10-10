@@ -5013,7 +5013,8 @@ export class AgentSession implements SettingsScope {
 		options?: AgentEndSettleOptions,
 	): Promise<void> {
 		this.#settledAgentEnd = event;
-		await this.#flushPendingNoTurnMessages();
+		// Keep an empty display queue synchronous until the terminal event is parked.
+		if (this.#pendingNoTurnMessages.length > 0) await this.#flushPendingNoTurnMessages();
 		this.#emitRunState("idle");
 		// Tagged isTerminal so subscribers can tell final settles from scheduled
 		// continuations, and `yielded` so they can tell the agent's own follow-up
