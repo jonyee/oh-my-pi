@@ -17,15 +17,17 @@ jobs:
   build:
     name: Build and smoke ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: linux-x64
             runner: ubuntu-24.04
+            native_target: linux-x64-baseline
           - target: linux-arm64
             runner: ubuntu-24.04-arm
+            native_target: linux-arm64
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -35,10 +37,27 @@ jobs:
           bun-version: "1.4.2"
       - name: Install locked dependencies without lifecycle scripts
         run: bun install --frozen-lockfile --ignore-scripts
-      - name: Stage integrity-pinned upstream native addons
+      - name: Install native build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential clang libclang-dev cmake ninja-build pkg-config python3 unzip
+      - name: Set up pinned Bazel and build caches
+        uses: bazel-contrib/setup-bazel@083175551ceeceebc757ebee2127fde78840ca77 # 0.18.0
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+          disk-cache: true
+          cache-version: fork-linux-${{ matrix.target }}-v1
+      - name: Build native addon from checked-out source
         env:
-          TARGET: ${{ matrix.target }}
-        run: bun scripts/ci-fork-native-addons.ts "$TARGET"
+          NATIVE_TARGET: ${{ matrix.native_target }}
+          OMP_NATIVE_BUILD_BACKEND: bazel
+        run: |
+          set -euo pipefail
+          if [ "$(ulimit -Sn)" != unlimited ] && [ "$(ulimit -Sn)" -lt 65536 ]; then ulimit -Sn 65536 || true; fi
+          bun scripts/bazel-natives.ts "$NATIVE_TARGET" --dest packages/natives/native -- \
+            --config=ci --jobs=2 --local_resources=memory=HOST_RAM*0.6
       - name: Build standalone executable
         env:
           TARGET: ${{ matrix.target }}
@@ -67,8 +86,9 @@ jobs:
           set -euo pipefail
           mkdir -p fork-release
           cp "packages/coding-agent/binaries/omp-$TARGET" LICENSE THIRD-PARTY-NOTICES.txt fork-release/
-          printf 'Source repository: %s\nSource commit: %s\nRelease ref: %s\nBun: 1.4.2\nNative addon: 18.8.9 (integrity pinned in ci-fork-native-addons.ts)\n' \
-            "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_REF_NAME" > fork-release/BUILD.txt
+          native_version="$(bun -e 'console.log((await Bun.file("packages/natives/package.json").json()).version)')"
+          printf 'Source repository: %s\nSource commit: %s\nRelease ref: %s\nBun: 1.4.2\nNative addon: %s (built from checked-out source)\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_REF_NAME" "$native_version" > fork-release/BUILD.txt
           bun scripts/ci-release-checksums.ts "fork-release/SHA256SUMS-$TARGET.txt" \
             "fork-release/omp-$TARGET" fork-release/LICENSE fork-release/THIRD-PARTY-NOTICES.txt fork-release/BUILD.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -109,7 +129,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          printf 'Fork build of OMP from commit %s.\n\nLinux glibc executables for ARM64 and x64. Bun and the integrity-pinned upstream 18.8.9 native addon are embedded. Optional models and integrations may download runtime dependencies. No Decision advisor extension is bundled.\n\nVerify downloaded assets with: sha256sum -c SHA256SUMS.txt. The upstream updater is unchanged: do not use omp update to update this fork.\n' \
+          printf 'Fork build of OMP from commit %s.\n\nLinux glibc executables for ARM64 and baseline x64. Bun and the native addon built from this source commit are embedded. Optional models and integrations may download runtime dependencies. No Decision advisor extension is bundled.\n\nVerify downloaded assets with: sha256sum -c SHA256SUMS.txt. The upstream updater is unchanged: do not use omp update to update this fork.\n' \
             "$GITHUB_SHA" > release-notes.txt
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" --verify-tag \
