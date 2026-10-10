@@ -23,7 +23,7 @@ async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
 async function archiveFixture(
 	dir: string,
 	files: readonly string[],
-	manifest: unknown = { name: "@oh-my-pi/pi-natives-linux-x64", version: "18.8.7" },
+	manifest: unknown = { name: "@oh-my-pi/pi-natives-linux-x64", version: "18.8.9" },
 	symlink?: string,
 ): Promise<string> {
 	const packageDir = path.join(dir, "payload/package");
@@ -46,7 +46,7 @@ async function gitFixture(dir: string): Promise<void> {
 	await fs.mkdir(path.join(dir, "crates/example/src"), { recursive: true });
 	await fs.mkdir(path.join(dir, "packages/natives"), { recursive: true });
 	await Bun.write(path.join(dir, "crates/example/src/lib.rs"), "pub fn example() {}\n");
-	await Bun.write(path.join(dir, "packages/natives/package.json"), '{"version":"18.8.7"}\n');
+	await Bun.write(path.join(dir, "packages/natives/package.json"), '{"version":"18.8.9"}\n');
 	await Bun.write(path.join(dir, "Cargo.toml"), "[workspace]\nmembers = []\n");
 	await Bun.write(path.join(dir, "Cargo.lock"), "version = 4\n");
 	await $`git init --quiet ${dir}`.quiet();
@@ -132,7 +132,7 @@ describe("pinned native archive safety", () => {
 	});
 
 	it.each([
-		{ name: "@oh-my-pi/pi-natives-linux-arm64", version: "18.8.7" },
+		{ name: "@oh-my-pi/pi-natives-linux-arm64", version: "18.8.9" },
 		{ name: "@oh-my-pi/pi-natives-linux-x64", version: "18.8.8" },
 	])("rejects wrong package identity %j", async manifest => {
 		await withTempDir(async dir => {
@@ -160,7 +160,7 @@ describe("native source guards", () => {
 		await withTempDir(async dir => {
 			await fs.mkdir(path.join(dir, "packages/natives"), { recursive: true });
 			await Bun.write(path.join(dir, "packages/natives/package.json"), JSON.stringify({ version }));
-			await expect(assertNativeSource(dir)).rejects.toThrow("must have version 18.8.7");
+			await expect(assertNativeSource(dir)).rejects.toThrow("must have version 18.8.9");
 		});
 	});
 

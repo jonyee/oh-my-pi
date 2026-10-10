@@ -67,7 +67,7 @@ jobs:
           set -euo pipefail
           mkdir -p fork-release
           cp "packages/coding-agent/binaries/omp-$TARGET" LICENSE THIRD-PARTY-NOTICES.txt fork-release/
-          printf 'Source repository: %s\nSource commit: %s\nRelease ref: %s\nBun: 1.4.2\nNative addon: 18.8.7 (integrity pinned in ci-fork-native-addons.ts)\n' \
+          printf 'Source repository: %s\nSource commit: %s\nRelease ref: %s\nBun: 1.4.2\nNative addon: 18.8.9 (integrity pinned in ci-fork-native-addons.ts)\n' \
             "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_REF_NAME" > fork-release/BUILD.txt
           bun scripts/ci-release-checksums.ts "fork-release/SHA256SUMS-$TARGET.txt" \
             "fork-release/omp-$TARGET" fork-release/LICENSE fork-release/THIRD-PARTY-NOTICES.txt fork-release/BUILD.txt
@@ -109,7 +109,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          printf 'Fork build of OMP from commit %s.\n\nLinux glibc executables for ARM64 and x64. Bun and the integrity-pinned upstream 18.8.7 native addon are embedded. Optional models and integrations may download runtime dependencies. No Decision advisor extension is bundled.\n\nVerify downloaded assets with: sha256sum -c SHA256SUMS.txt. The upstream updater is unchanged: do not use omp update to update this fork.\n' \
+          printf 'Fork build of OMP from commit %s.\n\nLinux glibc executables for ARM64 and x64. Bun and the integrity-pinned upstream 18.8.9 native addon are embedded. Optional models and integrations may download runtime dependencies. No Decision advisor extension is bundled.\n\nVerify downloaded assets with: sha256sum -c SHA256SUMS.txt. The upstream updater is unchanged: do not use omp update to update this fork.\n' \
             "$GITHUB_SHA" > release-notes.txt
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" --verify-tag \

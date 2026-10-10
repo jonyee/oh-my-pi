@@ -4,12 +4,12 @@ import { $ } from "bun";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-const NATIVE_VERSION = "18.8.7";
+const NATIVE_VERSION = "18.8.9";
 const SOURCE_OBJECTS = {
-	crates: "ea4ed11c09198e16904adb927d5fde745f0ce0ec",
-	"packages/natives": "e3fa6b5e96e71b12f3a3de84d349edb23ee3efff",
-	"Cargo.toml": "1d9cd1465fac50dfc836b0a81b49aaeab83dbe10",
-	"Cargo.lock": "6eaff157e7b74ff89a5edf8ebf365313c8c8bee9",
+	crates: "4df7de053dcc11c608be7f98eb44740765f7b162",
+	"packages/natives": "4dffd0dfd3248cde0c9ca9ae75892b39b01e340b",
+	"Cargo.toml": "f4e1613580c19ca211b287763b3f1948970118aa",
+	"Cargo.lock": "8d345931a67a9121bf19eab7ba1d6e2cd9176cc1",
 };
 
 export interface NativeTarget {
@@ -22,14 +22,14 @@ export interface NativeTarget {
 const TARGETS: readonly NativeTarget[] = [
 	{
 		id: "linux-arm64",
-		url: "https://registry.npmjs.org/@oh-my-pi/pi-natives-linux-arm64/-/pi-natives-linux-arm64-18.8.7.tgz",
-		integrity: "sha512-8dxGIS0wg9nXMeNbq+pOHlHrLQiaQ19iol63QvthTwwzDbLNJxBMW2AyaPmDg0Nx6CtTZ7SeYebQX6Z26rwLcA==",
+		url: "https://registry.npmjs.org/@oh-my-pi/pi-natives-linux-arm64/-/pi-natives-linux-arm64-18.8.9.tgz",
+		integrity: "sha512-xfARj/W2pYKmh1wOQyItWopltw+yM0hAu2O76MFqOvQ48NCL0NuHXh7f+D9+fxPVPhK/4r6rqed53Y2gXZRR2Q==",
 		files: ["pi_natives.linux-arm64.node"],
 	},
 	{
 		id: "linux-x64",
-		url: "https://registry.npmjs.org/@oh-my-pi/pi-natives-linux-x64/-/pi-natives-linux-x64-18.8.7.tgz",
-		integrity: "sha512-2wo3Ot+XwEfq7OiuvckqyBoC8Sj30jNNL/b2Vl6Z/nuGru50jWi36YQPQWkJY89YxuSDZc0IG8GYTcr+TGhCnA==",
+		url: "https://registry.npmjs.org/@oh-my-pi/pi-natives-linux-x64/-/pi-natives-linux-x64-18.8.9.tgz",
+		integrity: "sha512-8EtejfmJCAEOKNmsrCl2Kbe4bFZFY7rA5/6s8E7EwaOXRxTQCnzU5qk5mxz50k6q3aKdPGsq/FmfZg2iSwis/Q==",
 		files: ["pi_natives.linux-x64-baseline.node", "pi_natives.linux-x64-modern.node"],
 	},
 ];

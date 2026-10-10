@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [18.8.8] - 2026-10-10
+
+### Fixed
+
+- Fixed long retained transcripts exhausting local memory extraction models by limiting each extraction input to 8192 characters while keeping the opening context and newest turns ([#14956](https://github.com/can1357/oh-my-pi/issues/14956)).
+
 ## [18.8.7] - 2026-10-09
 
 ### Fixed

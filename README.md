@@ -42,16 +42,16 @@ This fork's `Fork Linux binaries` workflow (`.github/workflows/fork-release.yml`
   gh workflow run fork-release.yml --repo jonyee/oh-my-pi --ref fix/advisor-no-trigger
   ```
 
-- **Push a `fork-v*` tag:** builds and verifies both executables, then publishes a new GitHub Release on that tag. Tag the commit containing both the host patch and this workflow; for example, use `fork-v18.8.7-1`. The tag trigger works without first merging into the default branch. Do not use the upstream version-bump/release script, which has different publishing targets.
+- **Push a `fork-v*` tag:** builds and verifies both executables, then publishes a new GitHub Release on that tag. Tag the commit containing both the host patch and this workflow; for example, use `fork-v18.8.9-1`. The tag trigger works without first merging into the default branch. Do not use the upstream version-bump/release script, which has different publishing targets.
 - Build jobs have read-only repository access. Only the tag-triggered publish job requests `contents: write` using GitHub's automatic token; no npm, Apple signing, Azure credentials or custom runner is needed. Enable Actions for the fork if GitHub has disabled inherited workflows, and ensure organization policy allows that job permission. This workflow does not change repository settings itself.
 - Releases contain `omp-linux-arm64`, `omp-linux-x64`, `SHA256SUMS.txt`, `BUILD.txt` (source commit and dependency versions), and license notices. Each binary runs built-in smoke checks and an offline advisor-delivery probe before upload. Both architecture jobs must succeed before publication; an existing release is not overwritten.
 
-The workflow reuses SHA-512-pinned upstream **18.8.7** native addons because this fork's patch is TypeScript-only. The staging helper rejects native package version or native-source tree changes; if Rust/native sources change, build matching addons or update their source/integrity pins deliberately. The compiled CLI still reports its upstream package version; use the release tag and `BUILD.txt` to identify the fork revision.
+The workflow reuses SHA-512-pinned upstream **18.8.9** native addons because this fork's patch is TypeScript-only. The staging helper rejects native package version or native-source tree changes; if Rust/native sources change, build matching addons or update their source/integrity pins deliberately. The compiled CLI still reports its upstream package version; use the release tag and `BUILD.txt` to identify the fork revision.
 
 After a release exists, download and verify the executable for your architecture without replacing the system-managed `omp`:
 
 ```sh
-tag=fork-v18.8.7-1
+tag=fork-v18.8.9-1
 case "$(uname -m)" in
   aarch64|arm64) asset=omp-linux-arm64 ;;
   x86_64) asset=omp-linux-x64 ;;
