@@ -1,5 +1,6 @@
 import { type Component } from "../tui";
 import { Disclosure } from "../components/disclosure";
+import { Text } from "../components/text";
 import { visibleWidth } from "../utils";
 import type { AdvisorMessageDetails, AdvisorNote, AdvisorSeverity } from "./messages";
 import { formatBadge, replaceTabs, type ToolUIColor, wrapTextWithAnsi } from "../render/render-utils";
@@ -155,6 +156,23 @@ function advisorNoteSpans(entry: AdvisorNote): TspSpan[] {
 	return spans;
 }
 
+/** Plain advisor presentation for text-only consumers, including completed empty reviews. */
+export function formatAdvisorMessageText(details: AdvisorMessageDetails | undefined): string {
+	const notes = details?.notes ?? [];
+	if (notes.length === 0) {
+		if (details?.status === "accept") return "The advisor was requested but had no findings.";
+		if (details?.status === "cannot_tell")
+			return "The advisor was requested but could not determine whether a correction is needed.";
+		return "";
+	}
+	const paragraphs = notes.map(entry => {
+		const severity = entry.severity ? `[${entry.severity.toUpperCase()}] ` : "";
+		const advisor = entry.advisor && entry.advisor !== "default" ? `[${entry.advisor}] ` : "";
+		return `${severity}${advisor}${entry.note}`;
+	});
+	return `Advisor — ${notes.length} ${notes.length === 1 ? "note" : "notes"}\n\n${paragraphs.join("\n\n")}`;
+}
+
 /** The advisor card: shared by the controlled expansion getter and native toggles. */
 export interface AdvisorMessageCard extends Component {
 	/** Transcript-wide expansion (`Ctrl+O`); clears a toggle made in the terminal. */
@@ -178,6 +196,20 @@ export function createAdvisorMessageCard(
 	uiTheme: Theme,
 ): AdvisorMessageCard {
 	const notes = details?.notes ?? [];
+	if (notes.length === 0 && details?.status) {
+		const label = formatAdvisorMessageText(details);
+		const notice = new Text(uiTheme.fg("dim", uiTheme.italic(label)), 1, 0);
+		const described = text([span(label, "dim em")], { wrap: "word", role: "omp.advisor" });
+		return {
+			render: width => notice.render(width),
+			describe: () => described,
+			setExpanded: () => {},
+			handleNativeEvent: () => {},
+			invalidate: () => notice.invalidate(),
+			releaseRenderCaches: () => notice.releaseRenderCaches(),
+			setIgnoreTight: ignore => notice.setIgnoreTight(ignore),
+		};
+	}
 	const blockers = notes.filter(note => note.severity === "blocker").length;
 	const meta: string[] = [`${notes.length} ${notes.length === 1 ? "note" : "notes"}`];
 	if (blockers > 0) meta.push(uiTheme.fg("error", `${blockers} blocker${blockers === 1 ? "" : "s"}`));

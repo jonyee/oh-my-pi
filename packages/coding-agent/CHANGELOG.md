@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed extension messages sent with explicit `triggerTurn: false` and no delivery mode steering an active run into an extra model turn; they now append and display once at a safe boundary, including terminal hooks.
+- Print mode now emits displayed native advisor findings and accepted/uncertain review notices through the host's shared plain-text presentation.
+
 ## [18.8.7] - 2026-10-09
 
 ### Added

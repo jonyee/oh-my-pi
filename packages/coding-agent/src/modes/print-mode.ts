@@ -7,6 +7,8 @@
  */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
+import { formatAdvisorMessageText } from "@oh-my-pi/pi-tui/chat/advisor-message";
+import type { AdvisorMessageDetails } from "@oh-my-pi/pi-tui/chat/messages";
 import { $flag, logger, postmortem, sanitizeText } from "@oh-my-pi/pi-utils";
 import type { MCPManager } from "../mcp/manager";
 import { resolveMCPTimeoutMs } from "../mcp/timeout";
@@ -233,6 +235,14 @@ async function runPrintModeCore(
 		// In JSON mode, output all events
 		if (mode === "json") {
 			writeStdoutLine(`${JSON.stringify(printableEvent(event))}\n`);
+		} else if (
+			event.type === "message_end" &&
+			event.message.role === "custom" &&
+			event.message.customType === "advisor" &&
+			event.message.display
+		) {
+			const text = formatAdvisorMessageText(event.message.details as AdvisorMessageDetails | undefined);
+			if (text) writeStdoutLine(`${sanitizeText(text)}\n`);
 		} else if (event.type === "notice" && event.source === CREDENTIAL_DISABLED_NOTICE_SOURCE) {
 			// Text mode renders no session notices, but an automatic sign-out must not stay
 			// hidden behind a sibling account that quietly answers the prompt.

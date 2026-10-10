@@ -1027,6 +1027,12 @@ export class AgentSession implements SettingsScope {
 	 *  enqueue and fold/resume normally across an in-session interrupt, only a session identity
 	 *  change should drop them. */
 	#sessionGeneration = 0;
+	/** Default-delivery no-turn messages wait outside the agent's continuation queues. */
+	#pendingNoTurnMessages: Array<{
+		message: CustomMessage;
+		promptGeneration: number;
+		sessionGeneration: number;
+	}> = [];
 	/** Latest `session_init` of the transcript the model calls ran on; `init` is null when it has none. */
 	#sessionInit: { sessionFile: string | undefined; init: PersistedSessionInit | null } | undefined;
 	/** Settles when switchSession commits or restores its previous generation on rollback.
@@ -1881,6 +1887,7 @@ export class AgentSession implements SettingsScope {
 			if (context?.willContinue) this.#steerAnthropicWrapUp();
 			await this.#advisors.onPrimaryTurnEnd(messages, context?.willContinue, signal);
 			await this.#maintenance.maintainContextMidRun(messages, signal, context);
+			await this.#flushPendingNoTurnMessages(true);
 		});
 		this.yieldQueue = new YieldQueue({
 			isStreaming: () => this.isStreaming,
@@ -4816,6 +4823,7 @@ export class AgentSession implements SettingsScope {
 				await this.agent.waitForIdle();
 				continue;
 			}
+			await this.#flushPendingNoTurnMessages();
 			break;
 		}
 	}
@@ -4957,6 +4965,7 @@ export class AgentSession implements SettingsScope {
 		options?: AgentEndSettleOptions,
 	): Promise<void> {
 		this.#settledAgentEnd = event;
+		await this.#flushPendingNoTurnMessages();
 		this.#emitRunState("idle");
 		// Tagged isTerminal so subscribers can tell final settles from scheduled
 		// continuations, and `yielded` so they can tell the agent's own follow-up
@@ -5400,6 +5409,7 @@ export class AgentSession implements SettingsScope {
 	 */
 	beginDispose(): void {
 		this.#isDisposed = true;
+		this.#pendingNoTurnMessages = [];
 		for (const dispose of this.#disposers.splice(0)) dispose();
 		this.#modelDiscoveryAbortController.abort();
 		this.#queuedMessageDrainBlocked = false;
@@ -5817,6 +5827,7 @@ export class AgentSession implements SettingsScope {
 		//     re-deliver stale tool output into the cleared conversation
 		//     (mirrors newSession()).
 		this.#promptGeneration++;
+		this.#pendingNoTurnMessages = [];
 		await this.#cancelPostPromptTasks();
 		this.#cancelOwnAsyncJobs();
 
@@ -8591,7 +8602,8 @@ export class AgentSession implements SettingsScope {
 	 * Send a custom message to the session. Creates a CustomMessageEntry.
 	 *
 	 * Handles three cases:
-	 * - Streaming: queue as steer/follow-up, aside (next step boundary), or store for next turn
+	 * - Streaming: explicit default no-trigger appends at a safe boundary without a turn;
+	 *   otherwise queue as steer/follow-up, aside (next step boundary), or store for next turn
 	 * - Not streaming + triggerTurn: appends to state/session, starts new turn unless the client cannot own it
 	 * - Not streaming + no trigger: appends to state/session, no turn; with the default delivery
 	 *   (no deliverAs) a display:true message also paints to the interactive transcript
@@ -8654,6 +8666,7 @@ export class AgentSession implements SettingsScope {
 	): Promise<boolean> {
 		// Captured before the normalization await below — see #sessionGeneration's doc comment.
 		const sessionGeneration = this.#sessionGeneration;
+		const promptGeneration = this.#promptGeneration;
 		const normalizedPayload = normalizeCustomMessagePayload<T>(message);
 		const suppressQueueChip = options?.deliverAs === "nextTurn" || options?.deliverAs === "aside";
 		const details =
@@ -8675,6 +8688,23 @@ export class AgentSession implements SettingsScope {
 			timestamp: Date.now(),
 		};
 		const normalizedAppMessage = await this.#normalizeAgentMessageImages(appMessage);
+		if (options?.deliverAs === undefined && options?.triggerTurn === false) {
+			if (
+				this.#isDisposed ||
+				this.#abortInProgress ||
+				this.#unsubscribeAgent === undefined ||
+				this.#promptGeneration !== promptGeneration ||
+				this.#sessionGeneration !== sessionGeneration
+			) {
+				return false;
+			}
+			this.#pendingNoTurnMessages.push({ message: normalizedAppMessage, promptGeneration, sessionGeneration });
+			outcome.sessionClaimed = this.agent.state.isStreaming;
+			// Terminal hooks run while the session's prompt bracket is still busy, but
+			// the core loop may already be idle. Never wait for idle from those hooks.
+			await this.#flushPendingNoTurnMessages();
+			return false;
+		}
 		if (this.isStreaming) {
 			// Queued into a turn the agent owns: that turn holds the session. Busy only
 			// from another prompt's setup claims nothing (that prompt decides).
@@ -8764,30 +8794,51 @@ export class AgentSession implements SettingsScope {
 			return outcome.sessionClaimed;
 		}
 
-		this.agent.appendMessage(normalizedAppMessage);
-		this.sessionManager.appendCustomMessageEntry(
-			normalizedAppMessage.customType,
-			normalizedAppMessage.content,
-			normalizedAppMessage.display,
-			normalizedAppMessage.details,
-			normalizedAppMessage.attribution,
-		);
-		if (normalizedAppMessage.display === true) {
-			// Idle display append with no turn: notify session listeners so the interactive
-			// transcript paints it now instead of on the next rebuild. The entry is persisted
-			// above, before any listener sees these events, so a transcript replay racing this
-			// append always finds it — EventController defers pre-initial-render custom paints
-			// to that replay. Extension observers are detached so they cannot stall the caller.
-			await this.#emitSessionEvent(
-				{ type: "message_start", message: normalizedAppMessage },
-				{ detachExtensions: true },
-			);
-			await this.#emitSessionEvent(
-				{ type: "message_end", message: normalizedAppMessage },
-				{ detachExtensions: true },
-			);
-		}
+		this.#appendNoTurnCustomMessage(normalizedAppMessage);
 		return false;
+	}
+
+	/** The awaited turn hook and terminal unwind own the only streaming append boundaries. */
+	async #flushPendingNoTurnMessages(atTurnBoundary = false): Promise<void> {
+		if (this.#pendingNoTurnMessages.length === 0 || (!atTurnBoundary && this.agent.state.isStreaming)) return;
+		if (this.agent.state.pendingToolCalls.size > 0 || this.agent.state.streamMessage !== null) return;
+		// Tool/assistant commits are serialized independently of notification hooks.
+		// Let every earlier result reach storage before appending any custom entry.
+		await this.#messageEndPersistenceTail;
+		if (!atTurnBoundary && this.agent.state.isStreaming) return;
+		if (this.agent.state.pendingToolCalls.size > 0 || this.agent.state.streamMessage !== null) return;
+		const pending = this.#pendingNoTurnMessages;
+		this.#pendingNoTurnMessages = [];
+		// Commit and publish the whole batch without yielding: concurrent flushes and
+		// listener submissions cannot reorder its entries or split an event pair.
+		for (const { message, promptGeneration, sessionGeneration } of pending) {
+			if (
+				this.#isDisposed ||
+				this.#abortInProgress ||
+				this.#unsubscribeAgent === undefined ||
+				this.#promptGeneration !== promptGeneration ||
+				this.#sessionGeneration !== sessionGeneration
+			) {
+				continue;
+			}
+			this.#appendNoTurnCustomMessage(message);
+		}
+	}
+
+	#appendNoTurnCustomMessage(message: CustomMessage): void {
+		this.agent.appendMessage(message);
+		this.sessionManager.appendCustomMessageEntry(
+			message.customType,
+			message.content,
+			message.display,
+			message.details,
+			message.attribution,
+		);
+		if (message.display !== true) return;
+		// Persist before painting, as on the idle append path. Detached extension
+		// observers cannot stall a turn boundary or deadlock by waiting for idle.
+		void this.#emitSessionEvent({ type: "message_start", message }, { detachExtensions: true });
+		void this.#emitSessionEvent({ type: "message_end", message }, { detachExtensions: true });
 	}
 
 	/**
@@ -9570,6 +9621,7 @@ export class AgentSession implements SettingsScope {
 		// leave any queued steer/follow-up visible for the user rather than
 		// auto-starting a fresh turn during cleanup.
 		this.#abortInProgress = true;
+		this.#pendingNoTurnMessages = [];
 		try {
 			this.#titleGenerationAbortController.abort();
 			if (!this.#isDisposed) this.#titleGenerationAbortController = new AbortController();
@@ -9739,6 +9791,7 @@ export class AgentSession implements SettingsScope {
 			// outgoing session also drops its record instead of landing in this new one.
 			this.#irc.clearPending();
 			this.#sessionGeneration++;
+			this.#pendingNoTurnMessages = [];
 			this.#scheduledHiddenNextTurnGeneration = undefined;
 			this.#queuedMessageDrainBlocked = false;
 			this.#usagePreflightReadyForNextModelCall = false;
@@ -11293,6 +11346,7 @@ export class AgentSession implements SettingsScope {
 		// record on success but stays valid if the switch is rolled back to this same session.
 		const previousIrcPending = this.#irc.clearPending();
 		const previousSessionGeneration = this.#sessionGeneration++;
+		this.#pendingNoTurnMessages = [];
 		const generationSettled = Promise.withResolvers<void>();
 		const previousSessionGenerationSettled = this.#sessionGenerationSettled;
 		this.#sessionGenerationSettled = generationSettled.promise;

@@ -303,6 +303,8 @@ export interface AdvisorNote {
 /** Details payload on the batched `advisor` custom message rendered in the transcript. */
 export interface AdvisorMessageDetails {
 	notes: AdvisorNote[];
+	/** Review outcome displayed only when the batch has no notes. */
+	status?: "accept" | "cannot_tell";
 }
 
 /** Custom message type for supervised process completions. */
